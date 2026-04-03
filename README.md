@@ -10,6 +10,11 @@
 
 ---
 
+![Nova Dashboard](docs/nova-dashboard.png)
+*Nova Desktop — all 7 backends live: Ollama, MLX Code, OpenRouter, OpenWebUI, TinyChat, SwarmUI, ComfyUI*
+
+---
+
 ## What It Is
 
 Nova-NextGen is a local AI gateway that sits in front of your entire AI stack and makes routing decisions for you. You send one request, describe what you need, and the gateway picks the right backend — based on the task, what's currently available, and each engine's unique strengths.
