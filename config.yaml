@@ -1,6 +1,6 @@
 gateway:
   port: 34750
-  host: "0.0.0.0"
+  host: "127.0.0.1"   # Loopback only — change to 0.0.0.0 only if LAN access is intentional
   log_level: "INFO"
   db_path: "~/.nova_gateway/context.db"
 

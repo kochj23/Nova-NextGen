@@ -110,9 +110,17 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Restrict to localhost origins — this gateway is a local service.
+    # Prevents arbitrary web pages from making cross-origin requests to it.
+    allow_origins=[
+        "http://localhost",
+        "http://localhost:34750",
+        "http://127.0.0.1",
+        "http://127.0.0.1:34750",
+        "app://.",            # Electron / Tauri desktop apps
+    ],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
 )
 
 

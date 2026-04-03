@@ -24,7 +24,7 @@ class TaskType(str, Enum):
 
 
 class QueryRequest(BaseModel):
-    query: str = Field(..., description="The prompt or query to process")
+    query: str = Field(..., min_length=1, max_length=100_000, description="The prompt or query to process")
     task_type: TaskType = Field(TaskType.auto, description="Task type for routing")
     preferred_backend: Optional[str] = Field(None, description="Override backend: ollama, mlxcode, swarmui, comfyui")
     model: Optional[str] = Field(None, description="Override specific model (Ollama only)")
@@ -50,10 +50,10 @@ class QueryResponse(BaseModel):
 
 
 class ContextWriteRequest(BaseModel):
-    session_id: str
-    key: str
-    value: str
-    ttl_seconds: Optional[int] = None
+    session_id: str = Field(..., min_length=1, max_length=128)
+    key: str = Field(..., min_length=1, max_length=256)
+    value: str = Field(..., max_length=50_000)
+    ttl_seconds: Optional[int] = Field(None, ge=1, le=86400)
 
 
 class ContextReadRequest(BaseModel):
