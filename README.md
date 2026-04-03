@@ -10,9 +10,6 @@
 
 ---
 
-![Nova Dashboard](docs/nova-dashboard.png)
-*Nova Desktop — all 7 backends live: Ollama, MLX Code, OpenRouter, OpenWebUI, TinyChat, SwarmUI, ComfyUI*
-
 ---
 
 ## What It Is
