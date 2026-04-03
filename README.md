@@ -1,9 +1,10 @@
 # Nova-NextGen AI Gateway
 
-> A local AI router for macOS — automatically routes queries to the right model across Ollama, MLXCode, SwarmUI, and ComfyUI, with session memory, cross-model consensus, and a Swift client drop-in.
+> A local AI intent router for macOS — automatically routes queries to the right model across seven backends: TinyChat, MLXCode, MLX Chat, OpenWebUI, Ollama, SwarmUI, and ComfyUI. One endpoint. Zero manual model selection.
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![Version](https://img.shields.io/badge/Version-2.0.0-orange)
 ![Platform](https://img.shields.io/badge/Platform-macOS%20Apple%20Silicon-000000?logo=apple&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
@@ -11,55 +12,69 @@
 
 ## What It Is
 
-If you run multiple local AI backends — Ollama, a local LLM app, an image generator — you probably spend time deciding which one to call for each task. Nova-NextGen removes that decision. You send one request to one endpoint, and the gateway picks the right backend based on what you're asking.
+Nova-NextGen is a local AI gateway that sits in front of your entire AI stack and makes routing decisions for you. You send one request, describe what you need, and the gateway picks the right backend — based on the task, what's currently available, and each engine's unique strengths.
+
+It also integrates cleanly with **OpenRouter/DeepSeek V3** for cloud conversations, while keeping all compute work local.
 
 ```
-Your App  ──►  POST /api/ai/query
-                      │
-              ┌───────▼────────┐
-              │  Nova-NextGen  │  :34750
-              │   (Router)     │
-              └───────┬────────┘
-                      │
-          ┌───────────┼────────────┬──────────────┐
-          ▼           ▼            ▼              ▼
-    MLXCode       Ollama        SwarmUI        ComfyUI
-    :37422        :11434        :7801          :8188
-  (Apple ANE)  (deepseek,     (image         (image
-  coding/swift  qwen3, etc.)   generation)   workflows)
+Your App / Nova / curl
+          │
+          ▼
+  Nova-NextGen :34750
+  (Intent Router)
+          │
+          ├─ quick / classify ──────────► TinyChat   :8000  (qwen3:4b — fastest)
+          │
+          ├─ coding / swift ───────────► MLXCode    :37422 (Apple Neural Engine)
+          │                                  │
+          │                                  └─ fallback ──► MLX Chat :5000
+          │
+          ├─ general / creative / summarize ► MLX Chat  :5000 (Apple ANE fast)
+          │                                      │
+          │                                      └─ fallback ──► Ollama :11434
+          │
+          ├─ document / research ──────► OpenWebUI  :3000  (RAG-capable)
+          │                                  │
+          │                                  └─ fallback ──► Ollama :11434
+          │
+          ├─ reasoning / analysis ─────► Ollama     :11434 (deepseek-r1:8b)
+          │
+          ├─ vision ───────────────────► Ollama     :11434 (qwen3-vl:4b)
+          │
+          ├─ image ────────────────────► SwarmUI    :7801
+          │                                  │
+          │                                  └─ fallback ──► ComfyUI :8188
+          │
+          └─ long_context ─────────────► Ollama     :11434 (deepseek-v3.1-cloud)
 ```
-
-**What it does:**
-- Detects the task type from your prompt (or you specify it explicitly)
-- Routes to the best available backend for that task
-- Falls back automatically if the preferred backend is down or has no model loaded
-- Keeps a SQLite session memory store so context persists across calls
-- Optionally runs queries through 2–3 backends and scores how much they agree
-- Logs every query for analytics and debugging
-- Runs as a macOS LaunchAgent — starts on login, no manual management
 
 ---
 
-## Supported Backends
+## Why Seven Backends?
 
-| Backend | Port | Best For | Notes |
+Each engine has a distinct strength. Routing to the right one matters:
+
+| Backend | Port | Strength | Best Task Types |
 |---|---|---|---|
-| [Ollama](https://ollama.com) | 11434 | Reasoning, coding, general | Most flexible — runs any model |
-| [MLXCode](https://github.com/kochj23/MLX-Code) | 37422 | Swift/coding, fast responses | Uses Apple Neural Engine via MLX |
-| [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) | 7801 | Image generation | Primary image backend |
-| [ComfyUI](https://github.com/comfyanonymous/ComfyUI) | 8188 | Image workflows | Fallback for image generation |
+| **TinyChat** | 8000 | Fastest round-trip, minimal overhead | `quick`, `classify`, `format` |
+| **MLXCode** | 37422 | Apple Neural Engine, Swift/coding specialist | `coding`, `swift`, `debug` |
+| **MLX Chat** | 5000 | Apple Neural Engine, fast general inference | `general`, `creative`, `summarize` |
+| **OpenWebUI** | 3000 | RAG, document grounding, conversation history | `document`, `research` |
+| **Ollama** | 11434 | Best reasoning model (deepseek-r1), vision (qwen3-vl), largest model variety | `reasoning`, `analysis`, `vision`, `long_context` |
+| **SwarmUI** | 7801 | Full-featured image generation UI | `image` |
+| **ComfyUI** | 8188 | Node-based image workflows | `image` (fallback) |
 
-You don't need all four running. The gateway health-checks each backend on startup and per request, routing around anything that's down.
+**OpenRouter/DeepSeek V3** is used by Nova for conversations — it's not a local backend but integrates through `nova_intent_router.py` (see [Nova Integration](#nova-integration)).
 
 ---
 
 ## Requirements
 
 - macOS (Apple Silicon recommended, Intel works)
-- Python 3.12 — specifically 3.12, not 3.13/3.14 (pydantic-core's Rust bindings don't yet support 3.14)
-- At least one supported backend installed and runnable
+- Python 3.12 — not 3.13/3.14 (pydantic-core Rust bindings require ≤ 3.13)
+- At least one local backend running
 
-Install Python 3.12 via Homebrew if needed:
+Install Python 3.12 if needed:
 ```bash
 brew install python@3.12
 ```
@@ -74,191 +89,112 @@ cd Nova-NextGen
 bash install.sh
 ```
 
-`install.sh` does the following:
-1. Creates a Python 3.12 virtual environment at `~/.nova_gateway/venv`
-2. Installs all dependencies from `requirements.txt`
-3. Generates a LaunchAgent plist at `~/Library/LaunchAgents/com.nova.gateway.plist`
-4. Loads and starts the LaunchAgent
+`install.sh`:
+1. Creates a Python 3.12 venv at `~/.nova_gateway/venv`
+2. Installs all dependencies
+3. Generates and loads a LaunchAgent (`com.nova.gateway.plist`)
 
-The gateway starts immediately and restarts automatically on login.
+The gateway starts immediately and auto-starts on login.
 
-Verify it's running:
 ```bash
 curl http://localhost:34750/health
-# → {"status":"ok","uptime_seconds":4}
+# → {"status":"ok","uptime_seconds":3,"version":"2.0.0"}
 
 curl http://localhost:34750/api/ai/backends
-# → lists each backend with available/unavailable and latency
+# → lists all 7 backends with available/unavailable and latency
 ```
 
 ---
 
 ## Quick Start
 
-### Send your first query
+### Auto-routing — just ask
 
 ```bash
 curl -X POST http://localhost:34750/api/ai/query \
   -H "Content-Type: application/json" \
-  -d '{"query": "What is the time complexity of merge sort?"}'
+  -d '{"query": "Write a Swift function that debounces a Combine publisher"}'
 ```
 
 ```json
 {
-  "response": "Merge sort has a time complexity of O(n log n) in all cases...",
-  "backend_used": "ollama",
-  "model_used": "deepseek-r1:8b",
-  "task_type": "reasoning",
-  "session_id": "a3f91c...",
-  "tokens_per_second": 38.4,
-  "fallback_used": false,
-  "validated": false
-}
-```
-
-The gateway detected `"time complexity"` as a reasoning task and routed to `deepseek-r1:8b` automatically.
-
----
-
-## Routing
-
-### How auto-routing works
-
-When `task_type` is `"auto"` (the default), the gateway scans the prompt for keywords and maps them to a task type. Routing rules then pick the backend.
-
-**Keyword detection examples:**
-
-| Keywords in prompt | Detected task | Backend |
-|---|---|---|
-| `swift`, `xcode`, `swiftui`, `uikit`, `appkit` | `swift` | MLXCode → Ollama |
-| `write code`, `debug`, `function`, `algorithm`, `refactor` | `coding` | MLXCode → Ollama |
-| `why does`, `step by step`, `tradeoff`, `explain why` | `reasoning` | Ollama deepseek-r1 |
-| `analyze`, `evaluate`, `assess`, `compare` | `analysis` | Ollama deepseek-r1 |
-| `generate image`, `draw`, `render`, `paint`, `artwork` | `image` | SwarmUI → ComfyUI |
-| `what is in this image`, `describe this image` | `vision` | Ollama qwen3-vl |
-| `write a story`, `poem`, `creative writing`, `brainstorm` | `creative` | Ollama |
-| `summarize this entire`, `full document`, `long text` | `long_context` | Ollama deepseek-v3.1 |
-| *(no match)* | `general` | Ollama qwen3-coder:30b |
-
-### Explicit task type
-
-Skip detection and route directly:
-
-```bash
-curl -X POST http://localhost:34750/api/ai/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Review this function for bugs",
-    "task_type": "coding"
-  }'
-```
-
-### Force a specific backend or model
-
-```bash
-curl -X POST http://localhost:34750/api/ai/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Summarize this text",
-    "preferred_backend": "ollama",
-    "model": "qwen3-coder:30b"
-  }'
-```
-
-### Routing table
-
-| `task_type` | Preferred Backend | Model | Fallback |
-|---|---|---|---|
-| `coding` | MLXCode | mlx-local | Ollama qwen3-coder:30b |
-| `swift` | MLXCode | mlx-local | Ollama qwen3-coder:30b |
-| `reasoning` | Ollama | deepseek-r1:8b | — |
-| `analysis` | Ollama | deepseek-r1:8b | — |
-| `vision` | Ollama | qwen3-vl:4b | — |
-| `image` | SwarmUI | — | ComfyUI |
-| `creative` | Ollama | qwen3-coder:30b | — |
-| `long_context` | Ollama | deepseek-v3.1:671b-cloud | — |
-| `general` | Ollama | qwen3-coder:30b | — |
-| `auto` | *(keyword detection picks one above)* | | |
-
-Fallback applies when the preferred backend is unreachable or has no model loaded. If all backends for a task type are down, the gateway returns HTTP 503.
-
----
-
-## Shared Context Bus
-
-The context store lets you persist information across calls within a session without re-sending it every time.
-
-### Write to context
-
-```bash
-curl -X POST http://localhost:34750/api/context/write \
-  -H "Content-Type: application/json" \
-  -d '{
-    "session_id": "project-x",
-    "key": "requirements",
-    "value": "The app must support offline mode, biometric auth, and dark mode.",
-    "ttl_seconds": 3600
-  }'
-```
-
-### Use context in a query
-
-```bash
-curl -X POST http://localhost:34750/api/ai/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Write a test plan",
-    "session_id": "project-x",
-    "context_keys": ["requirements"]
-  }'
-```
-
-The gateway prepends `[Context: requirements] The app must support...` to the prompt before sending it to the backend. The model sees the context; you don't have to re-send it.
-
-### Read context
-
-```bash
-# Read a single key
-curl "http://localhost:34750/api/context/read?session_id=project-x&key=requirements"
-
-# Read all keys in a session
-curl "http://localhost:34750/api/context/session?session_id=project-x"
-```
-
-### Clear a session
-
-```bash
-curl -X DELETE "http://localhost:34750/api/context/session?session_id=project-x"
-```
-
-**Limits:** key ≤ 256 chars, value ≤ 50,000 chars, TTL 1–86,400 seconds (default 1 hour). Expired entries are cleaned up automatically every 5 minutes.
-
----
-
-## Cross-Model Consensus
-
-For critical outputs — security review, important decisions — run the query through multiple backends and score how much they agree.
-
-```bash
-curl -X POST http://localhost:34750/api/ai/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Is this regular expression safe from ReDoS: ^(a+)+$",
-    "validate_with": 2
-  }'
-```
-
-```json
-{
-  "response": "Yes, this pattern is vulnerable to ReDoS...",
-  "validated": true,
-  "consensus_score": 0.84,
-  "backend_used": "ollama",
+  "response": "import Combine\n\nextension Publisher {\n    func debounce...",
+  "backend_used": "mlxcode",
+  "model_used": "mlx-local",
+  "task_type": "swift",
+  "tokens_per_second": 142.3,
   "fallback_used": false
 }
 ```
 
-`consensus_score` is 0.0–1.0 (cosine similarity across responses). A score ≥ 0.7 means the models substantially agree. Below that, the gateway logs a discrepancy warning. The response returned is the longest (most detailed) answer from the set.
+The gateway detected `"swift"` → `"Combine"` → routed to MLXCode on the Apple Neural Engine automatically.
+
+### Explicit task type
+
+```bash
+# Fast classification (TinyChat)
+curl -X POST http://localhost:34750/api/ai/query \
+  -d '{"query": "Is this error recoverable: SIGKILL", "task_type": "quick"}'
+
+# Document-grounded query (OpenWebUI RAG)
+curl -X POST http://localhost:34750/api/ai/query \
+  -d '{"query": "What does section 4.2 say?", "task_type": "document"}'
+
+# Deep reasoning (Ollama deepseek-r1)
+curl -X POST http://localhost:34750/api/ai/query \
+  -d '{"query": "Analyze the security implications of this auth flow", "task_type": "reasoning"}'
+
+# General text (MLX Chat — Apple Silicon fast)
+curl -X POST http://localhost:34750/api/ai/query \
+  -d '{"query": "Summarize these release notes", "task_type": "summarize"}'
+
+# Image generation (SwarmUI)
+curl -X POST http://localhost:34750/api/ai/query \
+  -d '{"query": "A fox sitting in snow at dusk, cinematic lighting", "task_type": "image"}'
+```
+
+---
+
+## Task Types
+
+### Routing table
+
+| `task_type` | Primary Backend | Model | Fallback |
+|---|---|---|---|
+| `quick` | TinyChat | qwen3:4b | Ollama |
+| `coding` | MLXCode | mlx-local | MLX Chat → Ollama |
+| `swift` | MLXCode | mlx-local | Ollama qwen3-coder:30b |
+| `general` | MLX Chat | Qwen2.5-7B (MLX) | Ollama qwen3-coder:30b |
+| `creative` | MLX Chat | Qwen2.5-7B (MLX) | Ollama qwen3-coder:30b |
+| `summarize` | MLX Chat | Qwen2.5-7B (MLX) | Ollama qwen3-coder:30b |
+| `document` | OpenWebUI | qwen3:30b | Ollama |
+| `research` | OpenWebUI | qwen3:30b | Ollama deepseek-r1:8b |
+| `reasoning` | Ollama | deepseek-r1:8b | — |
+| `analysis` | Ollama | deepseek-r1:8b | — |
+| `vision` | Ollama | qwen3-vl:4b | — |
+| `image` | SwarmUI | — | ComfyUI |
+| `long_context` | Ollama | deepseek-v3.1:671b-cloud | — |
+| `auto` | *(keyword detection)* | | |
+
+### Keyword auto-detection
+
+When `task_type` is `"auto"` (the default), the gateway scans your prompt:
+
+| Keywords | → task_type |
+|---|---|
+| `"yes or no"`, `"classify"`, `"tag this"`, `"one word answer"` | `quick` |
+| `"swift"`, `"swiftui"`, `"xcode"`, `"uikit"`, `"appkit"` | `swift` |
+| `"write code"`, `"debug"`, `"function"`, `"algorithm"`, `".py"`, `".rs"` | `coding` |
+| `"in this document"`, `"based on the file"`, `"this pdf"` | `document` |
+| `"research"`, `"find information about"`, `"background on"` | `research` |
+| `"why does"`, `"explain why"`, `"step by step"`, `"tradeoffs"` | `reasoning` |
+| `"analyze"`, `"root cause"`, `"patterns"`, `"diagnosis"` | `analysis` |
+| `"generate image"`, `"draw me"`, `"paint"`, `"render a"` | `image` |
+| `"what is in this image"`, `"describe this photo"` | `vision` |
+| `"summarize"`, `"tldr"`, `"key points"`, `"main takeaways"` | `summarize` |
+| `"write a story"`, `"poem"`, `"brainstorm"`, `"creative writing"` | `creative` |
+| `"full document"`, `"entire transcript"`, `"complete codebase"` | `long_context` |
+| *(no match)* | `general` |
 
 ---
 
@@ -266,58 +202,58 @@ curl -X POST http://localhost:34750/api/ai/query \
 
 ### `POST /api/ai/query`
 
-Routes a query to a backend and returns the response.
-
 **Request body:**
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `query` | string | required | The prompt. 1–100,000 characters. |
-| `task_type` | string | `"auto"` | `coding`, `swift`, `reasoning`, `analysis`, `image`, `vision`, `creative`, `long_context`, `general`, `auto` |
-| `preferred_backend` | string | null | Force a backend: `ollama`, `mlxcode`, `swarmui`, `comfyui` |
-| `model` | string | null | Override the Ollama model name (e.g. `"deepseek-r1:8b"`) |
-| `session_id` | string | null | Session identifier for context tracking and analytics |
-| `context_keys` | string[] | `[]` | Keys from the context store to inject into this prompt |
-| `validate_with` | int | null | 2 or 3: run through multiple backends and score consensus |
-| `stream` | bool | `false` | Not yet implemented |
-| `options` | object | `{}` | Backend-specific overrides: `temperature`, `max_tokens`, `system`, `negative_prompt`, `width`, `height`, `steps` |
+| `query` | string | required | Prompt, 1–100,000 chars |
+| `task_type` | string | `"auto"` | `quick`, `coding`, `swift`, `general`, `creative`, `summarize`, `document`, `research`, `reasoning`, `analysis`, `vision`, `image`, `long_context`, `auto` |
+| `preferred_backend` | string | null | Force: `tinychat`, `mlxcode`, `mlxchat`, `openwebui`, `ollama`, `swarmui`, `comfyui` |
+| `model` | string | null | Override model name (backend-specific) |
+| `session_id` | string | null | Session for context tracking |
+| `context_keys` | string[] | `[]` | Keys to inject from shared context bus |
+| `validate_with` | int | null | 2–3: run consensus validation across backends |
+| `stream` | bool | `false` | Streaming (Ollama only) |
+| `options` | object | `{}` | Backend options: `temperature`, `max_tokens`, `system`, `negative_prompt`, `width`, `height`, `steps` |
 
 **Response:**
 
 | Field | Type | Description |
 |---|---|---|
-| `response` | string | The model's output |
-| `backend_used` | string | Which backend handled the request |
-| `model_used` | string | Which model within that backend |
-| `task_type` | string | Resolved task type (useful when `"auto"` was used) |
-| `session_id` | string | Session ID (auto-generated if not provided) |
-| `tokens_per_second` | float | Generation speed (Ollama and MLXCode only) |
-| `token_count` | int | Token count (Ollama and MLXCode only) |
-| `validated` | bool | Whether consensus validation was run |
-| `consensus_score` | float | Agreement score if `validated` is true |
+| `response` | string | Model output |
+| `backend_used` | string | Backend that handled the request |
+| `model_used` | string | Specific model within that backend |
+| `task_type` | string | Resolved task type (useful when `"auto"`) |
+| `session_id` | string | Session ID |
+| `tokens_per_second` | float | Generation speed (TinyChat, MLXChat, MLXCode, Ollama) |
+| `token_count` | int | Output token count |
+| `validated` | bool | Whether consensus validation ran |
+| `consensus_score` | float | Agreement score (0.0–1.0) if validated |
 | `fallback_used` | bool | Whether routing fell back to a secondary backend |
-| `error` | string | Error message if the request partially failed |
 
 ---
 
 ### `GET /api/ai/status`
 
-Full gateway status snapshot.
+Full gateway snapshot: uptime, version, all backend health + latency, session count, total queries.
 
 ```json
 {
   "status": "running",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "port": 34750,
   "uptime_seconds": 3842,
   "backends": [
-    {"name": "ollama", "available": true, "url": "http://localhost:11434", "latency_ms": 8.1},
-    {"name": "mlxcode", "available": false, "url": "http://localhost:37422", "latency_ms": null},
-    {"name": "swarmui", "available": false, "url": "http://localhost:7801", "latency_ms": null},
-    {"name": "comfyui", "available": true, "url": "http://localhost:8188", "latency_ms": 5.2}
+    {"name": "tinychat",  "available": true,  "url": "http://localhost:8000",  "latency_ms": 2.1},
+    {"name": "mlxcode",   "available": true,  "url": "http://localhost:37422", "latency_ms": 4.8},
+    {"name": "mlxchat",   "available": true,  "url": "http://localhost:5000",  "latency_ms": 3.2},
+    {"name": "openwebui", "available": true,  "url": "http://localhost:3000",  "latency_ms": 8.4},
+    {"name": "ollama",    "available": true,  "url": "http://localhost:11434", "latency_ms": 9.1},
+    {"name": "swarmui",   "available": false, "url": "http://localhost:7801",  "latency_ms": null},
+    {"name": "comfyui",   "available": true,  "url": "http://localhost:8188",  "latency_ms": 5.3}
   ],
-  "active_sessions": 3,
-  "total_queries": 142
+  "active_sessions": 2,
+  "total_queries": 341
 }
 ```
 
@@ -325,317 +261,275 @@ Full gateway status snapshot.
 
 ### `GET /api/ai/backends`
 
-Quick backend availability list. Same backend array as above, without the gateway metadata.
+Same backend array as above, without gateway metadata.
 
 ---
 
 ### `POST /api/ai/validate`
 
-Force consensus validation. Same request body as `/api/ai/query` but always runs multi-backend comparison regardless of `validate_with`.
-
-**Response:**
+Force cross-model consensus. Same request body as `/api/ai/query`. Always runs through multiple backends.
 
 ```json
 {
   "consensus": true,
-  "score": 0.81,
+  "score": 0.83,
   "responses": ["Response from backend 1...", "Response from backend 2..."],
-  "backends_used": ["ollama", "mlxcode"],
-  "recommended": "The longer, more detailed response..."
+  "backends_used": ["ollama", "mlxchat"],
+  "recommended": "The longer, more complete response..."
 }
 ```
 
 ---
 
-### `POST /api/context/write`
+### Context Bus
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `session_id` | string | yes | Session identifier. Max 128 chars. |
-| `key` | string | yes | Context key. Max 256 chars. |
-| `value` | string | yes | Context value. Max 50,000 chars. |
-| `ttl_seconds` | int | no | Expiry in seconds. 1–86400. Default: 3600. |
+The context bus stores key-value pairs per session in SQLite. Inject stored context automatically into any query.
+
+**Write:**
+```bash
+curl -X POST http://localhost:34750/api/context/write \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "s1", "key": "project_goal", "value": "Build a HomeKit dashboard", "ttl_seconds": 3600}'
+```
+
+**Read:**
+```bash
+curl "http://localhost:34750/api/context/read?session_id=s1&key=project_goal"
+```
+
+**Read all:**
+```bash
+curl "http://localhost:34750/api/context/session?session_id=s1"
+```
+
+**Clear:**
+```bash
+curl -X DELETE "http://localhost:34750/api/context/session?session_id=s1"
+```
+
+**Inject into a query:**
+```bash
+curl -X POST http://localhost:34750/api/ai/query \
+  -d '{
+    "query": "What Swift frameworks should I use?",
+    "session_id": "s1",
+    "context_keys": ["project_goal"]
+  }'
+```
+The gateway prepends `[Context: project_goal] Build a HomeKit dashboard` to the prompt automatically.
+
+**Limits:** key ≤ 256 chars, value ≤ 50,000 chars, TTL 1–86,400s. Expired entries cleaned every 5 min.
 
 ---
 
-### `GET /api/context/read`
+### Analytics
 
-Query params: `session_id`, `key`. Returns `{"session_id", "key", "value"}` or 404 if not found or expired.
+```bash
+# Last 20 queries with backend, model, latency, fallback flag
+curl "http://localhost:34750/api/analytics/recent?limit=20"
 
----
-
-### `GET /api/context/session`
-
-Query param: `session_id`. Returns all non-expired entries: `{"session_id", "entries": {key: value, ...}, "count"}`.
-
----
-
-### `DELETE /api/context/session`
-
-Query param: `session_id`. Deletes all context entries and session record.
-
----
-
-### `GET /api/analytics/recent`
-
-Query param: `limit` (1–100, default 20). Returns the most recent queries from the log.
-
-```json
-{
-  "queries": [
-    {
-      "id": 142,
-      "session_id": "abc123",
-      "task_type": "reasoning",
-      "backend_used": "ollama",
-      "model_used": "deepseek-r1:8b",
-      "prompt_length": 87,
-      "response_length": 412,
-      "latency_ms": 4821.3,
-      "fallback_used": 0,
-      "validated": 0,
-      "created_at": "2026-04-03T21:14:02+00:00"
-    }
-  ],
-  "count": 1
-}
+# Aggregate totals
+curl http://localhost:34750/api/analytics/stats
 ```
 
 ---
 
-### `GET /api/analytics/stats`
+## Nova Integration
 
-```json
-{
-  "active_sessions": 3,
-  "total_queries": 142,
-  "uptime_seconds": 3842
-}
+Nova-NextGen integrates with [Nova (OpenClaw)](https://openclaw.ai) via `nova_intent_router.py` — a Python script that sits between Nova's agent loop and the gateway.
+
+**The two-tier model:**
+- **Cloud (OpenRouter DeepSeek V3)** — Nova's conversations with Jordan, herd emails, Slack replies, dream journal. This is Nova's *voice*.
+- **Local (Nova-NextGen)** — all compute work: code, summaries, analysis, images.
+
+```python
+# In any Nova script:
+import sys
+sys.path.insert(0, str(Path.home() / ".openclaw/scripts"))
+from nova_intent_router import route
+
+# Route to TinyChat for fast classification
+result = route(intent="classify", prompt="Is this log line an error? [2026-04-03 ERR] timeout")
+
+# Route to OpenWebUI for document query
+result = route(intent="document_query", prompt="What does section 3.2 say?")
+
+# Route to Ollama for deep reasoning
+result = route(intent="security_analysis", prompt="Review this auth code for vulnerabilities...")
+
+# Route to MLX Chat for summaries (Apple Silicon fast)
+result = route(intent="summarize_text", prompt="Summarize: ...")
+
+if result["success"]:
+    print(result["response"])
+    print(f"via {result['backend']} ({result.get('source')})")
 ```
 
----
+**Full intent list:**
+```bash
+python3 ~/.openclaw/scripts/nova_intent_router.py --list-intents
+```
 
-### `GET /health`
-
-Simple liveness check. Returns `{"status": "ok", "uptime_seconds": N}`.
+| Intent | Backend | Task Type |
+|---|---|---|
+| `conversation` | Cloud DeepSeek V3 | — |
+| `email_reply` | Cloud DeepSeek V3 | — |
+| `slack_reply` | Cloud DeepSeek V3 | — |
+| `dream_journal` | Cloud DeepSeek V3 | — |
+| `herd_outreach` | Cloud DeepSeek V3 | — |
+| `architecture` | Cloud DeepSeek V3 | — |
+| `classify` | TinyChat | quick |
+| `tag_content` | TinyChat | quick |
+| `yes_no` | TinyChat | quick |
+| `quick_lookup` | TinyChat | quick |
+| `format_output` | TinyChat | quick |
+| `code_review` | MLXCode | coding |
+| `code_generation` | MLXCode | coding |
+| `debug` | MLXCode | coding |
+| `swift_code` | MLXCode | swift |
+| `swift_review` | MLXCode | swift |
+| `text_summary` | MLX Chat | general |
+| `news_summary` | MLX Chat | general |
+| `github_digest` | MLX Chat | general |
+| `log_analysis` | MLX Chat | general |
+| `summarize_text` | MLX Chat | summarize |
+| `summarize_email_thread` | MLX Chat | summarize |
+| `document_query` | OpenWebUI | document |
+| `rag_lookup` | OpenWebUI | document |
+| `research_topic` | OpenWebUI | research |
+| `memory_consolidation` | Ollama | reasoning |
+| `deep_analysis` | Ollama | reasoning |
+| `security_analysis` | Ollama | reasoning |
+| `vision_analysis` | Ollama | vision |
+| `image_generation` | SwarmUI | image |
+| `long_document` | Ollama | long_context |
 
 ---
 
 ## Swift Integration
 
-`AIService.swift` is a drop-in Swift client. Copy it into any Xcode project to call the gateway from your macOS or iOS app.
+Drop `AIService.swift` into any Xcode project:
 
 ```swift
-import Foundation
-// (paste AIService.swift into your project — no SPM dependency needed)
-
-// Basic query
+// Query with auto-routing
 let result = try await AIService.shared.query(
     "Write a Swift extension to validate email addresses",
     taskType: .swift
 )
 print(result.response)
-// "Backend: mlxcode, 138.4 tok/s"
 print("Backend: \(result.backendUsed), \(result.tokensPerSecond ?? 0) tok/s")
 
-// Force a specific backend
-let analysis = try await AIService.shared.query(
-    "What are the security implications of this code?",
-    taskType: .analysis,
-    backend: "ollama",
-    model: "deepseek-r1:8b"
+// Quick classification (TinyChat — fastest)
+let answer = try await AIService.shared.query(
+    "Is this a valid IPv4 address: 192.168.1.999",
+    taskType: .quick
 )
 
-// Write shared context, then use it
-try await AIService.shared.writeContext(
-    session: "myapp-session",
-    key: "codebase_summary",
-    value: "Swift 6, SwiftUI, async/await throughout, no third-party dependencies"
+// Document-grounded query (OpenWebUI)
+let doc = try await AIService.shared.query(
+    "What does section 4.2 specify?",
+    taskType: .document
 )
 
+// Shared context
+try await AIService.shared.writeContext(session: "s1", key: "goal", value: "Build HomeKit dashboard")
 let advice = try await AIService.shared.query(
-    "What testing strategy would work best?",
-    session: "myapp-session",
-    contextKeys: ["codebase_summary"]
+    "Which Swift frameworks should I use?",
+    session: "s1",
+    contextKeys: ["goal"]
 )
 
-// Check if gateway is up before using it
-guard await AIService.shared.isAvailable() else {
-    print("Gateway not running — start it with: cd Nova-NextGen && ./run.sh")
-    return
-}
-
-// Full status
-let status = try await AIService.shared.status()
-let available = status.backends.filter { $0.available }.map { $0.name }
-print("Available backends: \(available.joined(separator: ", "))")
-```
-
-**Error handling:**
-
-```swift
-do {
-    let result = try await AIService.shared.query("...")
-} catch AIServiceError.gatewayUnavailable {
-    // Gateway not running — start it with launchctl start com.nova.gateway
-} catch AIServiceError.backendError(let message) {
-    // A backend returned an error
-} catch AIServiceError.networkError(let underlying) {
-    // Network issue
-}
+// Check gateway is up
+guard await AIService.shared.isAvailable() else { return }
 ```
 
 ---
 
 ## Configuration
 
-Edit `config.yaml` in the project root. Restart the gateway after changes:
-
-```bash
-launchctl stop com.nova.gateway && launchctl start com.nova.gateway
-```
-
-### Full config reference
+`config.yaml` controls all backends, routing rules, and tuning parameters.
 
 ```yaml
 gateway:
   port: 34750
-  host: "127.0.0.1"     # Change to "0.0.0.0" for LAN access (read SECURITY.md first)
-  log_level: "INFO"      # DEBUG, INFO, WARNING, ERROR
-  db_path: "~/.nova_gateway/context.db"
+  host: "127.0.0.1"   # Change to 0.0.0.0 for LAN (read SECURITY.md first)
+  log_level: "INFO"
 
 backends:
-  ollama:
-    url: "http://localhost:11434"
-    enabled: true
-    default_model: "deepseek-r1:8b"
-    models:
-      reasoning: "deepseek-r1:8b"
-      coding: "qwen3-coder:30b"
-      general: "qwen3-coder:30b"
-      vision: "qwen3-vl:4b"
-      creative: "qwen3-coder:30b"
-      swift: "qwen3-coder:30b"
-      analysis: "deepseek-r1:8b"
-      long_context: "deepseek-v3.1:671b-cloud"
+  tinychat:
+    url: "http://localhost:8000"
+    default_model: "qwen3:4b"
 
   mlxcode:
     url: "http://localhost:37422"
-    enabled: true
 
-  swarmui:
-    url: "http://localhost:7801"
-    enabled: true
+  mlxchat:
+    url: "http://localhost:5000"
+    default_model: "mlx-community/Qwen2.5-7B-Instruct-4bit"
 
-  comfyui:
-    url: "http://localhost:8188"
-    enabled: true
+  openwebui:
+    url: "http://localhost:3000"
+    default_model: "qwen3:30b"
+
+  ollama:
+    url: "http://localhost:11434"
+    models:
+      reasoning:    "deepseek-r1:8b"
+      vision:       "qwen3-vl:4b"
+      long_context: "deepseek-v3.1:671b-cloud"
+      coding:       "qwen3-coder:30b"
 
 routing:
   default_backend: "ollama"
-  default_model: "qwen3-coder:30b"
+  rules:
+    - task_type: "quick"
+      preferred: "tinychat"
+      fallback: "ollama"
 
-context:
-  ttl_seconds: 3600           # Default TTL for context entries
-  cleanup_interval_seconds: 300
+    - task_type: "coding"
+      preferred: "mlxcode"
+      fallback: "mlxchat"
+      fallback2: "ollama"
+
+    - task_type: "document"
+      preferred: "openwebui"
+      fallback: "ollama"
+
+    - task_type: "reasoning"
+      preferred: "ollama"
+      model: "deepseek-r1:8b"
 
 validation:
-  enabled: true
-  consensus_threshold: 0.7    # 0.0–1.0. Lower = easier to reach consensus.
-  max_validators: 2
-  timeout_seconds: 30
+  consensus_threshold: 0.7   # 0.0–1.0
 ```
 
-### Adding a new Ollama model
-
-Install the model in Ollama:
-```bash
-ollama pull llama3.2:3b
-```
-
-Then update `config.yaml` to route a task type to it:
-```yaml
-backends:
-  ollama:
-    models:
-      general: "llama3.2:3b"
-```
-
-Restart the gateway. No code changes needed.
+Restart after changes: `launchctl stop com.nova.gateway && launchctl start com.nova.gateway`
 
 ---
 
-## Managing the Service
+## Service Management
 
 ```bash
-# Check status
+# Status
 launchctl list | grep com.nova.gateway
 
-# Stop
+# Stop / start
 launchctl stop com.nova.gateway
-
-# Start
 launchctl start com.nova.gateway
 
-# Disable autostart (survives reboot)
+# Disable autostart
 launchctl unload ~/Library/LaunchAgents/com.nova.gateway.plist
 
 # Re-enable autostart
 launchctl load ~/Library/LaunchAgents/com.nova.gateway.plist
 
-# View live logs
+# Live logs
 tail -f ~/.nova_gateway/gateway.log
-
-# View error log
 tail -f ~/.nova_gateway/gateway.error.log
 
-# Manual start with hot reload (development)
-./run.sh --reload
-
-# Manual start with debug logging
-./run.sh --debug
+# Manual start (dev, hot reload)
+./run.sh --reload --debug
 ```
-
----
-
-## Troubleshooting
-
-### Gateway won't start
-
-Check the error log:
-```bash
-cat ~/.nova_gateway/gateway.error.log
-```
-
-Common causes:
-- **Port already in use** — something else is on 34750. Change `port` in `config.yaml`.
-- **Wrong Python version** — the venv must use Python 3.12. Run `bash install.sh` again.
-- **Volume not mounted** — if the project lives on an external drive, it must be mounted before the LaunchAgent runs. The venv is stored at `~/.nova_gateway/venv` (on the boot drive) to avoid this.
-
-### All backends show unavailable
-
-```bash
-# Check if Ollama is running
-/usr/local/bin/ollama list
-
-# Start Ollama
-/usr/local/bin/ollama serve &
-
-# Check MLXCode
-curl http://localhost:37422/api/status
-```
-
-### Ollama queries time out
-
-Large models (30B+) can take 30–60 seconds to load on first call. The gateway timeout is 300 seconds. Subsequent calls to the same model are faster once it's in memory.
-
-### MLXCode shows as unavailable even though it's open
-
-MLXCode's health check verifies that a model is loaded (`modelLoaded: true`). Open MLXCode and load a model first, then it will show as available.
-
-### Context entries returning 404
-
-Entries expire after their TTL (default 1 hour). Write again with a longer `ttl_seconds`, or set `ttl_seconds: null` for no expiry (not recommended for large values).
 
 ---
 
@@ -644,43 +538,66 @@ Entries expire after their TTL (default 1 hour). Write again with a longer `ttl_
 ```
 Nova-NextGen/
 ├── nova_gateway/
-│   ├── main.py              # FastAPI app — all routes and lifecycle
-│   ├── router.py            # Task type detection and backend selection
-│   ├── config.py            # config.yaml loader with typed accessors
+│   ├── main.py              # FastAPI app — startup, all routes
+│   ├── router.py            # Intent detection + backend selection + fallback
+│   ├── config.py            # config.yaml loader
 │   ├── models.py            # Pydantic request/response models
 │   ├── backends/
-│   │   ├── base.py          # Abstract base class all backends implement
-│   │   ├── ollama.py        # Ollama /api/generate integration
-│   │   ├── mlxcode.py       # MLXCode /api/chat integration
-│   │   ├── swarmui.py       # SwarmUI GenerateText2Image integration
-│   │   └── comfyui.py       # ComfyUI /prompt workflow integration
+│   │   ├── base.py          # Abstract base (httpx async, health_check)
+│   │   ├── tinychat.py      # TinyChat — OpenAI-compat, qwen3:4b, fastest
+│   │   ├── mlxcode.py       # MLXCode — Apple ANE, Swift/coding
+│   │   ├── mlxchat.py       # MLX Chat — Apple ANE, fast general
+│   │   ├── openwebui.py     # OpenWebUI — RAG, document processing
+│   │   ├── ollama.py        # Ollama — reasoning, vision, long context
+│   │   ├── swarmui.py       # SwarmUI — image generation
+│   │   └── comfyui.py       # ComfyUI — image workflows (fallback)
 │   ├── context/
-│   │   └── store.py         # aiosqlite-backed session memory bus
+│   │   └── store.py         # aiosqlite session memory bus
 │   └── validation/
-│       └── consensus.py     # Cosine similarity cross-model scoring
+│       └── consensus.py     # Cosine-similarity cross-model scoring
 ├── AIService.swift          # Drop-in Swift client for Xcode projects
 ├── config.yaml              # All runtime configuration
 ├── requirements.txt         # Pinned Python dependencies
 ├── run.sh                   # Manual start / dev mode
 ├── install.sh               # One-shot setup + LaunchAgent registration
-├── SECURITY.md              # Threat model and hardening guide
+├── SECURITY.md              # Threat model, hardening guide
 └── LICENSE                  # MIT
 ```
 
 ---
 
+## Troubleshooting
+
+**Gateway won't start:**
+```bash
+cat ~/.nova_gateway/gateway.error.log
+```
+Common causes: port 34750 in use (change in `config.yaml`), wrong Python version (must be 3.12).
+
+**Backend shows unavailable:**
+- TinyChat: check Docker container is running — `docker ps | grep tinychat`
+- MLXCode: app must be open with a model loaded (`/api/status` returns `modelLoaded: true`)
+- MLX Chat: check port 5000 is serving — `curl http://localhost:5000/health`
+- OpenWebUI: check Docker container — `docker ps | grep openwebui`
+- Ollama: start with `/usr/local/bin/ollama serve`
+
+**Ollama queries are slow on first call:**
+Large models (30B+) take 30–60 seconds to load from disk. Subsequent calls are fast once the model is resident. The gateway timeout is 300s.
+
+**OpenWebUI RAG not returning document results:**
+RAG in OpenWebUI requires documents to be uploaded and indexed through the OpenWebUI web interface first. The gateway sends the query but document retrieval is managed by OpenWebUI itself.
+
+---
+
 ## Security
 
-The gateway is designed as a **localhost-only service**:
-
 - Binds to `127.0.0.1` by default — not reachable from other machines
-- CORS restricted to `http://localhost` and `http://127.0.0.1` origins
-- All SQL queries use parameterized statements — no injection risk
+- CORS restricted to `http://localhost` and `http://127.0.0.1`
+- All SQL uses parameterized queries — no injection risk
 - Input validated by Pydantic on every request
-- No credentials stored anywhere in the project
-- No outbound network calls (all backends are local)
+- No credentials stored in this project
 
-See [SECURITY.md](SECURITY.md) for the full threat model, a hardening guide for LAN deployment, and the vulnerability disclosure process.
+See [SECURITY.md](SECURITY.md) for the full threat model and hardening guide for LAN deployment.
 
 ---
 
@@ -690,23 +607,15 @@ See [SECURITY.md](SECURITY.md) for the full threat model, a hardening guide for 
 |---|---|---|
 | `fastapi` | 0.115.6 | HTTP framework |
 | `uvicorn[standard]` | 0.34.0 | ASGI server |
-| `httpx` | 0.28.1 | Async HTTP client for backend calls |
-| `aiosqlite` | 0.20.0 | Async SQLite for context store |
-| `pyyaml` | 6.0.2 | Config file parsing |
+| `httpx` | 0.28.1 | Async HTTP client |
+| `aiosqlite` | 0.20.0 | Async SQLite context store |
+| `pyyaml` | 6.0.2 | Config parsing |
 | `pydantic` | 2.10.4 | Request/response validation |
-| `python-multipart` | 0.0.20 | Form data support |
+| `python-multipart` | 0.0.20 | Form data |
 | `aiofiles` | 24.1.0 | Async file operations |
-
-All versions are pinned. Dependabot is configured to alert on vulnerability disclosures weekly.
 
 ---
 
 ## License
 
-MIT License — Copyright © 2026 Jordan Koch.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-**THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND**, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+MIT License — Copyright © 2026 Jordan Koch. See [LICENSE](LICENSE).

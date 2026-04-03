@@ -1,19 +1,30 @@
 """
-main.py — Nova-NextGen Unified AI Gateway
+main.py — Nova-NextGen Unified AI Gateway v2.0
 Port: 34750
 
+Seven backends. One endpoint. Automatic routing based on task intent.
+
+Backends:
+  tinychat  :8000  — fast/lightweight, classification, quick tasks
+  mlxcode   :37422 — Apple Neural Engine, Swift + coding
+  mlxchat   :5000  — Apple Neural Engine, fast general inference
+  openwebui :3000  — RAG, document processing, conversation history
+  ollama    :11434 — deepseek-r1 reasoning, qwen3-vl vision, long context
+  swarmui   :7801  — image generation (primary)
+  comfyui   :8188  — image generation workflows (fallback)
+
 Endpoints:
-  POST /api/ai/query          — Route a query to the best available AI backend
-  GET  /api/ai/status         — Gateway + all backend health status
-  GET  /api/ai/backends       — List backends and availability
-  POST /api/ai/validate       — Run cross-model consensus validation
-  POST /api/context/write     — Write a key/value to shared context
-  GET  /api/context/read      — Read a key from shared context
+  POST /api/ai/query          — Route a query to the best available backend
+  GET  /api/ai/status         — Gateway + all backend health
+  GET  /api/ai/backends       — Backend availability list
+  POST /api/ai/validate       — Cross-model consensus validation
+  POST /api/context/write     — Write to shared session context
+  GET  /api/context/read      — Read a context key
   GET  /api/context/session   — Read all context for a session
-  DELETE /api/context/session — Clear a session's context
+  DELETE /api/context/session — Clear a session
   GET  /api/analytics/recent  — Recent query log
   GET  /api/analytics/stats   — Aggregate stats
-  GET  /health                — Simple health check
+  GET  /health                — Liveness check
 
 Author: Jordan Koch
 """
@@ -27,19 +38,21 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from . import config
 from .models import (
     QueryRequest, QueryResponse, ContextWriteRequest,
     BackendStatus, GatewayStatus, ValidationResult
 )
-from .backends import OllamaBackend, MLXCodeBackend, SwarmUIBackend, ComfyUIBackend
+from .backends import (
+    OllamaBackend, MLXCodeBackend, MLXChatBackend,
+    TinyChatBackend, OpenWebUIBackend, SwarmUIBackend, ComfyUIBackend
+)
 from .context import ContextStore
 from .router import Router
 from .validation import ConsensusValidator
 
-# ── Logging ─────────────────────────────────────────────────────────────────
+# ── Logging ──────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,7 +61,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("nova_gateway")
 
-# ── App globals ──────────────────────────────────────────────────────────────
+# ── App globals ───────────────────────────────────────────────────────────────
 
 _start_time = time.monotonic()
 _context_store: Optional[ContextStore] = None
@@ -62,22 +75,38 @@ async def lifespan(app: FastAPI):
     global _context_store, _router, _validator, _backends
 
     cfg = config.load()
-    logger.info(f"Nova-NextGen Gateway starting on port {config.gateway_port()}")
+    bc = cfg.get("backends", {})
+    logger.info(f"Nova-NextGen Gateway v2.0 starting on port {config.gateway_port()}")
 
-    # Initialise backends
-    b_cfg = cfg.get("backends", {})
-
+    # Initialise all seven backends
     _backends = {
-        "ollama":   OllamaBackend(
-            url=b_cfg.get("ollama", {}).get("url", "http://localhost:11434"),
-            default_model=b_cfg.get("ollama", {}).get("default_model", "qwen3-coder:30b")
+        "tinychat": TinyChatBackend(
+            url=bc.get("tinychat", {}).get("url", "http://localhost:8000"),
+            default_model=bc.get("tinychat", {}).get("default_model", "qwen3:4b"),
         ),
-        "mlxcode":  MLXCodeBackend(url=b_cfg.get("mlxcode", {}).get("url", "http://localhost:37422")),
-        "swarmui":  SwarmUIBackend(url=b_cfg.get("swarmui", {}).get("url", "http://localhost:7801")),
-        "comfyui":  ComfyUIBackend(url=b_cfg.get("comfyui", {}).get("url", "http://localhost:8188")),
+        "mlxcode": MLXCodeBackend(
+            url=bc.get("mlxcode", {}).get("url", "http://localhost:37422"),
+        ),
+        "mlxchat": MLXChatBackend(
+            url=bc.get("mlxchat", {}).get("url", "http://localhost:5000"),
+            default_model=bc.get("mlxchat", {}).get("default_model", "mlx-community/Qwen2.5-7B-Instruct-4bit"),
+        ),
+        "openwebui": OpenWebUIBackend(
+            url=bc.get("openwebui", {}).get("url", "http://localhost:3000"),
+            default_model=bc.get("openwebui", {}).get("default_model", "qwen3:30b"),
+        ),
+        "ollama": OllamaBackend(
+            url=bc.get("ollama", {}).get("url", "http://localhost:11434"),
+            default_model=bc.get("ollama", {}).get("default_model", "qwen3-coder:30b"),
+        ),
+        "swarmui": SwarmUIBackend(
+            url=bc.get("swarmui", {}).get("url", "http://localhost:7801"),
+        ),
+        "comfyui": ComfyUIBackend(
+            url=bc.get("comfyui", {}).get("url", "http://localhost:8188"),
+        ),
     }
 
-    # Start context store
     _context_store = ContextStore()
     await _context_store.start()
 
@@ -88,13 +117,13 @@ async def lifespan(app: FastAPI):
     statuses = await _router.all_statuses()
     for s in statuses:
         icon = "✓" if s["available"] else "✗"
-        latency = f" ({s['latency_ms']}ms)" if s["available"] else ""
-        logger.info(f"  {icon} {s['name']:10} {s['url']}{latency}")
+        lat  = f" ({s['latency_ms']}ms)" if s["available"] else ""
+        logger.info(f"  {icon} {s['name']:12} {s['url']}{lat}")
 
-    logger.info(f"Nova-NextGen Gateway ready — http://0.0.0.0:{config.gateway_port()}")
+    available_count = sum(1 for s in statuses if s["available"])
+    logger.info(f"Nova-NextGen Gateway v2.0 ready — {available_count}/{len(statuses)} backends up — http://0.0.0.0:{config.gateway_port()}")
     yield
 
-    # Shutdown
     logger.info("Nova-NextGen Gateway shutting down...")
     await _context_store.stop()
     for backend in _backends.values():
@@ -103,39 +132,37 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Nova-NextGen AI Gateway",
-    description="Unified AI routing layer for Jordan Koch's local AI ecosystem.",
-    version="1.0.0",
+    description="Unified AI routing layer — TinyChat, MLXCode, MLXChat, OpenWebUI, Ollama, SwarmUI, ComfyUI.",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    # Restrict to localhost origins — this gateway is a local service.
-    # Prevents arbitrary web pages from making cross-origin requests to it.
     allow_origins=[
         "http://localhost",
         "http://localhost:34750",
         "http://127.0.0.1",
         "http://127.0.0.1:34750",
-        "app://.",            # Electron / Tauri desktop apps
+        "app://.",
     ],
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
 
-# ── Routes ───────────────────────────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "uptime_seconds": int(time.monotonic() - _start_time)}
+    return {"status": "ok", "uptime_seconds": int(time.monotonic() - _start_time), "version": "2.0.0"}
 
 
 @app.post("/api/ai/query", response_model=QueryResponse)
 async def query(req: QueryRequest):
     session_id = req.session_id or str(uuid.uuid4())
 
-    # Inject shared context into prompt if requested
+    # Inject shared context into prompt
     prompt = req.query
     if req.context_keys and _context_store:
         injections = []
@@ -156,13 +183,13 @@ async def query(req: QueryRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-    # Run validation if requested
+    # Consensus validation path
     if req.validate_with and req.validate_with >= 2:
         try:
-            result = await backend.query(prompt, model=model, **req.options)
+            first = await backend.query(prompt, model=model, **req.options)
             consensus_data = await _validator.validate(
                 prompt=prompt,
-                primary_response=result["response"],
+                primary_response=first["response"],
                 primary_backend=backend.name,
                 n_validators=req.validate_with,
                 model_override=model,
@@ -171,8 +198,9 @@ async def query(req: QueryRequest):
             response_text = consensus_data["recommended"]
             validated = True
             consensus_score = consensus_data["score"]
+            result = first
         except Exception as e:
-            logger.error(f"Validation failed: {e}")
+            logger.error(f"Validation error: {e}")
             raise HTTPException(status_code=500, detail=f"Validation error: {e}")
     else:
         try:
@@ -184,7 +212,6 @@ async def query(req: QueryRequest):
         validated = False
         consensus_score = None
 
-    # Log to analytics
     if _context_store:
         await _context_store.log_query(
             session_id=session_id,
@@ -216,12 +243,8 @@ async def query(req: QueryRequest):
 async def gateway_status():
     statuses = await _router.all_statuses()
     backend_statuses = [
-        BackendStatus(
-            name=s["name"],
-            available=s["available"],
-            url=s["url"],
-            latency_ms=s.get("latency_ms"),
-        )
+        BackendStatus(name=s["name"], available=s["available"],
+                      url=s["url"], latency_ms=s.get("latency_ms"))
         for s in statuses
     ]
     db_stats = await _context_store.stats() if _context_store else {}
@@ -244,7 +267,6 @@ async def validate(req: QueryRequest):
     n = req.validate_with or 2
     if n < 2:
         raise HTTPException(status_code=400, detail="validate_with must be >= 2")
-
     try:
         backend, model, _, _ = await _router.resolve(
             prompt=req.query,
@@ -264,7 +286,7 @@ async def validate(req: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Context endpoints ────────────────────────────────────────────────────────
+# ── Context endpoints ─────────────────────────────────────────────────────────
 
 @app.post("/api/context/write")
 async def context_write(req: ContextWriteRequest):
@@ -292,7 +314,7 @@ async def context_clear(session_id: str = Query(...)):
     return {"status": "cleared", "session_id": session_id}
 
 
-# ── Analytics ────────────────────────────────────────────────────────────────
+# ── Analytics ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/analytics/recent")
 async def analytics_recent(limit: int = Query(20, ge=1, le=100)):
@@ -304,4 +326,5 @@ async def analytics_recent(limit: int = Query(20, ge=1, le=100)):
 async def analytics_stats():
     stats = await _context_store.stats()
     stats["uptime_seconds"] = int(time.monotonic() - _start_time)
+    stats["version"] = "2.0.0"
     return stats

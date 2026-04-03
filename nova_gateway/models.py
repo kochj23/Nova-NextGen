@@ -11,23 +11,37 @@ from enum import Enum
 
 
 class TaskType(str, Enum):
-    coding = "coding"
-    swift = "swift"
-    reasoning = "reasoning"
-    analysis = "analysis"
-    image = "image"
-    vision = "vision"
-    creative = "creative"
-    long_context = "long_context"
-    general = "general"
-    auto = "auto"
+    # --- Precision / speed ---
+    quick       = "quick"        # TinyChat — classify, tag, yes/no, one-liners
+    # --- Code ---
+    coding      = "coding"       # MLXCode → MLXChat → Ollama
+    swift       = "swift"        # MLXCode → Ollama (Swift-specialised)
+    # --- General text ---
+    general     = "general"      # MLXChat → Ollama
+    creative    = "creative"     # MLXChat → Ollama
+    summarize   = "summarize"    # MLXChat → Ollama
+    # --- Document / RAG ---
+    document    = "document"     # OpenWebUI (RAG-capable)
+    research    = "research"     # OpenWebUI → Ollama
+    # --- Deep reasoning ---
+    reasoning   = "reasoning"    # Ollama deepseek-r1
+    analysis    = "analysis"     # Ollama deepseek-r1
+    # --- Specialised ---
+    vision      = "vision"       # Ollama qwen3-vl
+    image       = "image"        # SwarmUI → ComfyUI
+    long_context = "long_context" # Ollama deepseek-v3.1 cloud
+    # --- Auto-detect ---
+    auto        = "auto"
 
 
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=100_000, description="The prompt or query to process")
     task_type: TaskType = Field(TaskType.auto, description="Task type for routing")
-    preferred_backend: Optional[str] = Field(None, description="Override backend: ollama, mlxcode, swarmui, comfyui")
-    model: Optional[str] = Field(None, description="Override specific model (Ollama only)")
+    preferred_backend: Optional[str] = Field(
+        None,
+        description="Force a backend: ollama, mlxcode, mlxchat, tinychat, openwebui, swarmui, comfyui"
+    )
+    model: Optional[str] = Field(None, description="Override model name (backend-specific)")
     session_id: Optional[str] = Field(None, description="Session ID for shared context")
     context_keys: list[str] = Field(default_factory=list, description="Context keys to inject from shared memory")
     validate_with: Optional[int] = Field(None, ge=2, le=3, description="Run through N backends for consensus")
@@ -79,7 +93,7 @@ class BackendStatus(BaseModel):
 
 class GatewayStatus(BaseModel):
     status: str = "running"
-    version: str = "1.0.0"
+    version: str = "2.0.0"
     port: int
     uptime_seconds: int
     backends: list[BackendStatus]
