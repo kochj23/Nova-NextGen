@@ -1,0 +1,85 @@
+gateway:
+  port: 34750
+  host: "0.0.0.0"
+  log_level: "INFO"
+  db_path: "~/.nova_gateway/context.db"
+
+backends:
+  ollama:
+    url: "http://localhost:11434"
+    enabled: true
+    default_model: "deepseek-r1:8b"
+    models:
+      reasoning: "deepseek-r1:8b"
+      coding: "qwen3-coder:30b"
+      general: "qwen3-coder:30b"
+      vision: "qwen3-vl:4b"
+      creative: "qwen3-coder:30b"
+      swift: "qwen3-coder:30b"
+      analysis: "deepseek-r1:8b"
+      long_context: "deepseek-v3.1:671b-cloud"
+
+  mlxcode:
+    url: "http://localhost:37422"
+    enabled: true
+    tasks: ["coding", "swift", "fast", "local", "mlx"]
+
+  swarmui:
+    url: "http://localhost:7801"
+    enabled: true
+    tasks: ["image", "art", "render", "generate_image", "draw", "picture", "photo"]
+
+  comfyui:
+    url: "http://localhost:8188"
+    enabled: true
+    tasks: ["image", "art", "workflow", "comfy"]
+
+  nova:
+    url: "ws://127.0.0.1:18789"
+    http_url: "http://127.0.0.1:18789"
+    enabled: true
+
+routing:
+  default_backend: "ollama"
+  default_model: "qwen3-coder:30b"
+  rules:
+    - task_type: "coding"
+      preferred: "mlxcode"
+      fallback: "ollama"
+      fallback_model: "qwen3-coder:30b"
+    - task_type: "swift"
+      preferred: "mlxcode"
+      fallback: "ollama"
+      fallback_model: "qwen3-coder:30b"
+    - task_type: "reasoning"
+      preferred: "ollama"
+      model: "deepseek-r1:8b"
+    - task_type: "analysis"
+      preferred: "ollama"
+      model: "deepseek-r1:8b"
+    - task_type: "image"
+      preferred: "swarmui"
+      fallback: "comfyui"
+    - task_type: "vision"
+      preferred: "ollama"
+      model: "qwen3-vl:4b"
+    - task_type: "creative"
+      preferred: "ollama"
+      model: "qwen3-coder:30b"
+    - task_type: "long_context"
+      preferred: "ollama"
+      model: "deepseek-v3.1:671b-cloud"
+    - task_type: "general"
+      preferred: "ollama"
+      model: "qwen3-coder:30b"
+
+context:
+  ttl_seconds: 3600
+  max_entries_per_session: 200
+  cleanup_interval_seconds: 300
+
+validation:
+  enabled: true
+  consensus_threshold: 0.7
+  max_validators: 2
+  timeout_seconds: 30
