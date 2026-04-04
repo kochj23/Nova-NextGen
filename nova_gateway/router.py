@@ -132,16 +132,20 @@ class Router:
         rule = self._find_rule(task_type)
 
         if rule:
-            # Try preferred backend
+            # Try preferred backend — use rule's model unless caller overrides
             preferred_name = rule.get("preferred", config.default_backend())
-            rule_model = model_override or rule.get("model") or rule.get("fallback_model")
+            primary_model = model_override or rule.get("model")
             backend = self._backends.get(preferred_name)
             if backend:
                 available, _ = await backend.health_check()
                 if available:
-                    return backend, rule_model if rule_model != rule.get("fallback_model") else model_override or rule.get("model"), task_type, False
+                    logger.debug(
+                        f"Router: {task_type} → {preferred_name}"
+                        + (f" ({primary_model})" if primary_model else "")
+                    )
+                    return backend, primary_model, task_type, False
 
-            # Try primary fallback
+            # Try fallbacks in order (fallback, fallback2)
             for fallback_key in ("fallback", "fallback2"):
                 fallback_name = rule.get(fallback_key)
                 if not fallback_name or fallback_name not in self._backends:
@@ -150,7 +154,10 @@ class Router:
                 fb_available, _ = await fb_backend.health_check()
                 if fb_available:
                     fb_model = model_override or rule.get(f"{fallback_key}_model")
-                    logger.info(f"Router: '{preferred_name}' down → '{fallback_name}' ({fallback_key})")
+                    logger.info(
+                        f"Router: '{preferred_name}' unavailable → '{fallback_name}'"
+                        + (f" ({fb_model})" if fb_model else "")
+                    )
                     return fb_backend, fb_model, task_type, True
 
         # Last resort: first available backend in priority order

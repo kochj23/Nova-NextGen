@@ -52,21 +52,24 @@ Your App / Nova / curl
 
 ---
 
-## Why Seven Backends?
+## Intent Router — One Specialized Model Per Engine
 
-Each engine has a distinct strength. Routing to the right one matters:
+Each engine has a single specialized model chosen for its primary strength. The gateway routes tasks to the engine best suited for that task type.
 
-| Backend | Port | Strength | Best Task Types |
+> **Real-time chat with Nova always uses OpenRouter/DeepSeek V3 (cloud).** The local backends handle compute tasks only.
+
+| Engine | Port | Specialized Model | Primary Task Types |
 |---|---|---|---|
-| **TinyChat** | 8000 | Fastest round-trip, minimal overhead | `quick`, `classify`, `format` |
-| **MLXCode** | 37422 | Apple Neural Engine, Swift/coding specialist | `coding`, `swift`, `debug` |
-| **MLX Chat** | 5000 | Apple Neural Engine, fast general inference | `general`, `creative`, `summarize` |
-| **OpenWebUI** | 3000 | RAG, document grounding, conversation history | `document`, `research` |
-| **Ollama** | 11434 | Best reasoning model (deepseek-r1), vision (qwen3-vl), largest model variety | `reasoning`, `analysis`, `vision`, `long_context` |
-| **SwarmUI** | 7801 | Full-featured image generation UI | `image` |
-| **ComfyUI** | 8188 | Node-based image workflows | `image` (fallback) |
+| **TinyChat** | 8000 | `gpt-oss:20b` | `quick`, `classify` — lowest latency, efficient |
+| **MLXCode** | 37422 | mlx-local | `coding`, `swift`, `debug` — Apple Neural Engine |
+| **MLX Chat** | 5000 | Qwen2.5-7B (MLX) | `general`, `creative` — fast ANE inference (fallback) |
+| **OpenWebUI** | 3000 | `qwen3-vl:4b` | `vision`, `document`, `research` — multimodal + RAG |
+| **Ollama** | 11434 | `deepseek-r1:8b` | `reasoning`, `analysis`, `general` — generalist default |
+| **SwarmUI** | 7801 | Juggernaut XL | `image` — Stable Diffusion SDXL |
+| **ComfyUI** | 8188 | custom workflow | `image` fallback — advanced pipelines |
+| **OpenRouter** | cloud | DeepSeek V3 | conversations, email, Slack, dream journal — **Nova's voice** |
 
-**OpenRouter/DeepSeek V3** is used by Nova for conversations — it's not a local backend but integrates through `nova_intent_router.py` (see [Nova Integration](#nova-integration)).
+**Fallback chain:** If the primary engine is down, the gateway cascades to the next best option automatically. Ambiguous tasks default to Ollama `deepseek-r1:8b`.
 
 ---
 
@@ -161,22 +164,22 @@ curl -X POST http://localhost:34750/api/ai/query \
 
 ### Routing table
 
-| `task_type` | Primary Backend | Model | Fallback |
+| `task_type` | Primary Engine | Specialized Model | Fallback |
 |---|---|---|---|
-| `quick` | TinyChat | qwen3:4b | Ollama |
-| `coding` | MLXCode | mlx-local | MLX Chat → Ollama |
-| `swift` | MLXCode | mlx-local | Ollama qwen3-coder:30b |
-| `general` | MLX Chat | Qwen2.5-7B (MLX) | Ollama qwen3-coder:30b |
-| `creative` | MLX Chat | Qwen2.5-7B (MLX) | Ollama qwen3-coder:30b |
-| `summarize` | MLX Chat | Qwen2.5-7B (MLX) | Ollama qwen3-coder:30b |
-| `document` | OpenWebUI | qwen3:30b | Ollama |
-| `research` | OpenWebUI | qwen3:30b | Ollama deepseek-r1:8b |
-| `reasoning` | Ollama | deepseek-r1:8b | — |
-| `analysis` | Ollama | deepseek-r1:8b | — |
-| `vision` | Ollama | qwen3-vl:4b | — |
-| `image` | SwarmUI | — | ComfyUI |
-| `long_context` | Ollama | deepseek-v3.1:671b-cloud | — |
-| `auto` | *(keyword detection)* | | |
+| `quick` | TinyChat | `gpt-oss:20b` | Ollama `gpt-oss:20b` |
+| `coding` | MLXCode | mlx-local | MLX Chat → Ollama `qwen3-coder:30b` |
+| `swift` | MLXCode | mlx-local | Ollama `qwen3-coder:30b` |
+| `vision` | OpenWebUI | `qwen3-vl:4b` | Ollama `qwen3-vl:4b` |
+| `document` | OpenWebUI | `qwen3-vl:4b` | Ollama `deepseek-r1:8b` |
+| `research` | OpenWebUI | `qwen3-vl:4b` | Ollama `deepseek-r1:8b` |
+| `general` | Ollama | `deepseek-r1:8b` | — |
+| `summarize` | Ollama | `deepseek-r1:8b` | — |
+| `creative` | Ollama | `deepseek-r1:8b` | — |
+| `reasoning` | Ollama | `deepseek-r1:8b` | — |
+| `analysis` | Ollama | `deepseek-r1:8b` | — |
+| `image` | SwarmUI | Juggernaut XL | ComfyUI |
+| `long_context` | Ollama | `deepseek-v3.1:671b-cloud` | — |
+| `auto` | *(keyword detection picks one above)* | | |
 
 ### Keyword auto-detection
 

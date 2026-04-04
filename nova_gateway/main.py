@@ -76,13 +76,13 @@ async def lifespan(app: FastAPI):
 
     cfg = config.load()
     bc = cfg.get("backends", {})
-    logger.info(f"Nova-NextGen Gateway v2.0 starting on port {config.gateway_port()}")
+    logger.info(f"Nova-NextGen Gateway v2.1 starting on port {config.gateway_port()}")
 
     # Initialise all seven backends
     _backends = {
         "tinychat": TinyChatBackend(
             url=bc.get("tinychat", {}).get("url", "http://localhost:8000"),
-            default_model=bc.get("tinychat", {}).get("default_model", "qwen3:4b"),
+            default_model=bc.get("tinychat", {}).get("default_model", "gpt-oss:20b"),
         ),
         "mlxcode": MLXCodeBackend(
             url=bc.get("mlxcode", {}).get("url", "http://localhost:37422"),
@@ -93,14 +93,16 @@ async def lifespan(app: FastAPI):
         ),
         "openwebui": OpenWebUIBackend(
             url=bc.get("openwebui", {}).get("url", "http://localhost:3000"),
-            default_model=bc.get("openwebui", {}).get("default_model", "qwen3:30b"),
+            default_model=bc.get("openwebui", {}).get("default_model", "qwen3-vl:4b"),
+            api_key=bc.get("openwebui", {}).get("api_key", ""),
         ),
         "ollama": OllamaBackend(
             url=bc.get("ollama", {}).get("url", "http://localhost:11434"),
-            default_model=bc.get("ollama", {}).get("default_model", "qwen3-coder:30b"),
+            default_model=bc.get("ollama", {}).get("default_model", "deepseek-r1:8b"),
         ),
         "swarmui": SwarmUIBackend(
             url=bc.get("swarmui", {}).get("url", "http://localhost:7801"),
+            default_model=bc.get("swarmui", {}).get("default_model", "Juggernaut XL"),
         ),
         "comfyui": ComfyUIBackend(
             url=bc.get("comfyui", {}).get("url", "http://localhost:8188"),
