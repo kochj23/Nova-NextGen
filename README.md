@@ -16,7 +16,7 @@
 
 Nova-NextGen is a local AI gateway that sits in front of your entire AI stack and makes routing decisions for you. You send one request, describe what you need, and the gateway picks the right backend — based on the task, what's currently available, and each engine's unique strengths.
 
-It also integrates cleanly with **OpenRouter/DeepSeek V3** for cloud conversations, while keeping all compute work local.
+It also integrates cleanly with **OpenRouter/Qwen3-235B** for cloud conversations, while keeping all compute work local.
 
 ```
 Your App / Nova / curl
@@ -43,7 +43,7 @@ Your App / Nova / curl
           │
           ├─ vision ───────────────────► Ollama     :11434 (qwen3-vl:4b)
           │
-          ├─ image ────────────────────► SwarmUI    :7801
+          ├─ image ────────────────────► SwarmUI    :7802
           │                                  │
           │                                  └─ fallback ──► ComfyUI :8188
           │
@@ -56,7 +56,7 @@ Your App / Nova / curl
 
 Each engine has a single specialized model chosen for its primary strength. The gateway routes tasks to the engine best suited for that task type.
 
-> **Real-time chat with Nova always uses OpenRouter/DeepSeek V3 (cloud).** The local backends handle compute tasks only.
+> **Real-time chat with Nova always uses OpenRouter/Qwen3-235B (cloud).** The local backends handle compute tasks only.
 
 | Engine | Port | Specialized Model | Primary Task Types |
 |---|---|---|---|
@@ -65,9 +65,9 @@ Each engine has a single specialized model chosen for its primary strength. The 
 | **MLX Chat** | 5000 | Qwen2.5-7B (MLX) | `general`, `creative` — fast ANE inference (fallback) |
 | **OpenWebUI** | 3000 | `qwen3-vl:4b` | `vision`, `document`, `research` — multimodal + RAG |
 | **Ollama** | 11434 | `deepseek-r1:8b` | `reasoning`, `analysis`, `general` — generalist default |
-| **SwarmUI** | 7801 | Juggernaut XL | `image` — Stable Diffusion SDXL |
+| **SwarmUI** | 7802 | Juggernaut XL | `image` — Stable Diffusion SDXL |
 | **ComfyUI** | 8188 | custom workflow | `image` fallback — advanced pipelines |
-| **OpenRouter** | cloud | DeepSeek V3 | conversations, email, Slack, dream journal — **Nova's voice** |
+| **OpenRouter** | cloud | Qwen3-235B | conversations, email, Slack, dream journal — **Nova's voice** |
 
 **Fallback chain:** If the primary engine is down, the gateway cascades to the next best option automatically. Ambiguous tasks default to Ollama `deepseek-r1:8b`.
 
