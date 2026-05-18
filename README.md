@@ -1,5 +1,7 @@
 # Nova-NextGen AI Gateway
 
+> **ARCHIVED** — This repo has been merged into [kochj23/nova](https://github.com/kochj23/nova). See that repo for active development.
+
 A local-first AI routing gateway for macOS. One endpoint, multiple backends, automatic intent detection. Queries arrive at a single FastAPI server on port 34750 and get dispatched to whichever local AI engine is best suited for the task — coding goes to the code model, reasoning goes to the reasoning model, images go to the image generator. No manual model selection required.
 
 Written by Jordan Koch ([kochj23](https://github.com/kochj23)).
@@ -9,6 +11,13 @@ Written by Jordan Koch ([kochj23](https://github.com/kochj23)).
 ![Version](https://img.shields.io/badge/Version-2.1.0-orange)
 ![Platform](https://img.shields.io/badge/Platform-macOS%20Apple%20Silicon-000000?logo=apple&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
+
+---
+
+## Hardware
+
+- **Mac Studio M4 Ultra** — 512GB unified memory
+- **Memory system:** 1,224,900 vectors across 409 domains (PostgreSQL 17 + pgvector)
 
 ---
 
